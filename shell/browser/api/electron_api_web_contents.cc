@@ -58,6 +58,7 @@
 #include "content/public/browser/download_request_utils.h"
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/file_select_listener.h"
+#include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/keyboard_event_processing_result.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
@@ -102,6 +103,7 @@
 #include "shell/browser/api/message_port.h"
 #include "shell/browser/api/save_page_handler.h"
 #include "shell/browser/browser.h"
+#include "shell/browser/capture/shared_texture_capture_controller.h"
 #include "shell/browser/child_web_contents_tracker.h"
 #include "shell/browser/electron_autofill_driver_factory.h"
 #include "shell/browser/electron_browser_context.h"
@@ -134,6 +136,7 @@
 #include "shell/common/gin_converters/base_converter.h"
 #include "shell/common/gin_converters/blink_converter.h"
 #include "shell/common/gin_converters/callback_converter.h"
+#include "shell/common/gin_converters/captured_shared_texture_converter.h"
 #include "shell/common/gin_converters/content_converter.h"
 #include "shell/common/gin_converters/file_path_converter.h"
 #include "shell/common/gin_converters/frame_converter.h"
@@ -2568,6 +2571,8 @@ content::WebContents* WebContents::GetDevToolsWebContents() const {
 }
 
 void WebContents::WebContentsDestroyed() {
+  shared_texture_capture_controller_.reset();
+
   // Clear the pointer stored in wrapper.
   if (GetAllWebContents().Lookup(id_))
     GetAllWebContents().Remove(id_);
@@ -3970,6 +3975,75 @@ v8::Local<v8::Promise> WebContents::CapturePage(gin::Arguments* args) {
   return handle;
 }
 
+v8::Local<v8::Promise> WebContents::CaptureNextSharedTexture(
+    gin::Arguments* args) {
+  gin_helper::Promise<CapturedSharedTextureValue> promise(args->isolate());
+  v8::Local<v8::Promise> handle = promise.GetHandle();
+
+  SharedTextureCaptureController::Options capture_options;
+  int timeout_ms = capture_options.timeout.InMilliseconds();
+  gin_helper::Dictionary options;
+  if (args->GetNext(&options)) {
+    options.Get("timeoutMs", &timeout_ms);
+    options.Get("stayHidden", &capture_options.stay_hidden);
+    options.Get("stayAwake", &capture_options.stay_awake);
+
+    std::string pixel_format;
+    if (options.Get("pixelFormat", &pixel_format)) {
+      if (pixel_format == "bgra") {
+        capture_options.pixel_format = media::PIXEL_FORMAT_ARGB;
+      } else if (pixel_format == "rgba") {
+        capture_options.pixel_format = media::PIXEL_FORMAT_ABGR;
+      } else if (pixel_format == "rgbaf16") {
+        capture_options.pixel_format = media::PIXEL_FORMAT_RGBAF16;
+      } else {
+        promise.RejectWithErrorMessage(
+            "pixelFormat must be one of: bgra, rgba, rgbaf16");
+        return handle;
+      }
+    }
+  }
+
+  if (timeout_ms <= 0) {
+    promise.RejectWithErrorMessage("timeoutMs must be greater than 0");
+    return handle;
+  }
+  capture_options.timeout = base::Milliseconds(timeout_ms);
+
+  if (!web_contents()->GetRenderWidgetHostView()) {
+    promise.RejectWithErrorMessage("WebContents has no RenderWidgetHostView");
+    return handle;
+  }
+
+  if (content::GpuDataManager::Initialized() &&
+      !content::GpuDataManager::GetInstance()->HardwareAccelerationEnabled()) {
+    promise.RejectWithErrorMessage(
+        "captureNextSharedTexture requires hardware acceleration");
+    return handle;
+  }
+
+  if (!shared_texture_capture_controller_) {
+    shared_texture_capture_controller_ =
+        std::make_unique<SharedTextureCaptureController>(web_contents());
+  }
+
+  shared_texture_capture_controller_->CaptureNext(
+      capture_options,
+      base::BindOnce(
+          [](gin_helper::Promise<CapturedSharedTextureValue> promise,
+             std::optional<CapturedSharedTextureValue> texture,
+             std::string message) mutable {
+            if (texture) {
+              promise.Resolve(std::move(*texture));
+            } else {
+              promise.RejectWithErrorMessage(message);
+            }
+          },
+          std::move(promise)));
+
+  return handle;
+}
+
 bool WebContents::IsBeingCaptured() {
   return web_contents()->IsBeingCaptured();
 }
@@ -4940,6 +5014,8 @@ void WebContents::FillObjectTemplate(v8::Isolate* isolate,
                  &WebContents::ShowDefinitionForSelection)
       .SetMethod("copyImageAt", &WebContents::CopyImageAt)
       .SetMethod("capturePage", &WebContents::CapturePage)
+      .SetMethod("captureNextSharedTexture",
+                 &WebContents::CaptureNextSharedTexture)
       .SetMethod("setEmbedder", &WebContents::SetEmbedder)
       .SetMethod("setDevToolsWebContents", &WebContents::SetDevToolsWebContents)
       .SetMethod("isBeingCaptured", &WebContents::IsBeingCaptured)
