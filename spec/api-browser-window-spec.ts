@@ -2772,6 +2772,32 @@ describe('BrowserWindow module', () => {
       ).to.eventually.be.rejectedWith('pixelFormat must be one of: bgra, rgba, rgbaf16');
     });
 
+    ifit(process.platform === 'win32')('rejects a pending capture when WebContents is destroyed', async function () {
+      this.timeout(20000);
+
+      const w = new BrowserWindow({
+        show: false,
+        width: 320,
+        height: 240,
+        webPreferences: {
+          backgroundThrottling: false
+        }
+      });
+      await w.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(
+        '<body style="margin:0;background:#1565c0"></body>'
+      )}`);
+
+      const capture = (w.webContents as any).captureNextSharedTexture({
+        timeoutMs: 10000,
+        pixelFormat: 'bgra'
+      });
+      w.destroy();
+
+      await expect(capture).to.eventually.be.rejectedWith(
+        'WebContents was destroyed before a shared texture frame was captured'
+      );
+    });
+
     ifit(process.platform === 'win32')('captures from a hidden BrowserWindow', async function () {
       this.timeout(20000);
 
