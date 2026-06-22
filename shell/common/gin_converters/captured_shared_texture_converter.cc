@@ -58,6 +58,8 @@ struct CapturedReleaseHolderMonitor {
   }
 
   void ReleaseTexture() {
+    if (IsTextureReleased())
+      return;
     delete holder_;
     holder_ = nullptr;
   }

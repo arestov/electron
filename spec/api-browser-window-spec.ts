@@ -2808,6 +2808,45 @@ describe('BrowserWindow module', () => {
       expect(w.isVisible()).to.equal(false);
     });
 
+    ifit(process.platform === 'win32')('ignores duplicate release calls', async function () {
+      this.timeout(20000);
+
+      const w = new BrowserWindow({
+        show: true,
+        width: 320,
+        height: 240,
+        webPreferences: {
+          backgroundThrottling: false
+        }
+      });
+      await w.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(
+        '<body style="margin:0;background:#00695c"></body>'
+      )}`);
+
+      let texture: any;
+      try {
+        texture = await (w.webContents as any).captureNextSharedTexture({
+          timeoutMs: 5000,
+          pixelFormat: 'bgra'
+        });
+      } catch (error: any) {
+        if (
+          /requires hardware acceleration|not backed by a GPU memory buffer|Timed out while waiting/.test(error.message)
+        ) {
+          return this.skip();
+        }
+        throw error;
+      }
+
+      expect(() => {
+        texture.release();
+        texture.release();
+      }).to.not.throw();
+
+      const second = await (w.webContents as any).captureNextSharedTexture({ timeoutMs: 5000, pixelFormat: 'bgra' });
+      second.release();
+    });
+
     ifit(process.platform === 'win32')('preserves page visibility when stayHidden is true', async function () {
       this.timeout(20000);
 
