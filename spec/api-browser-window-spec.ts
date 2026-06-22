@@ -2798,6 +2798,36 @@ describe('BrowserWindow module', () => {
       );
     });
 
+    ifit(process.platform === 'win32')('rejects when no shared texture frame arrives before timeout', async function () {
+      this.timeout(20000);
+
+      const w = new BrowserWindow({
+        show: false,
+        width: 320,
+        height: 240,
+        webPreferences: {
+          backgroundThrottling: false
+        }
+      });
+      await w.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(
+        '<body style="margin:0;background:#4527a0"></body>'
+      )}`);
+
+      try {
+        await expect(
+          (w.webContents as any).captureNextSharedTexture({
+            timeoutMs: 1,
+            pixelFormat: 'bgra'
+          })
+        ).to.eventually.be.rejectedWith('Timed out while waiting for a shared texture frame');
+      } catch (error: any) {
+        if (/requires hardware acceleration|not backed by a GPU memory buffer/.test(error.message)) {
+          return this.skip();
+        }
+        throw error;
+      }
+    });
+
     ifit(process.platform === 'win32')('captures from a hidden BrowserWindow', async function () {
       this.timeout(20000);
 
