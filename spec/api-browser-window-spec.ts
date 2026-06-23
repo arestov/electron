@@ -3167,6 +3167,188 @@ describe('BrowserWindow module', () => {
     });
   });
 
+  describe('webContents.beginSharedTextureSubscription()', () => {
+    afterEach(closeAllWindows);
+
+    it('is exposed on WebContents', () => {
+      const w = new BrowserWindow({ show: false });
+      expect((w.webContents as any).beginSharedTextureSubscription).to.be.a('function');
+    });
+
+    it('rejects invalid fps values', () => {
+      const w = new BrowserWindow({ show: false });
+      expect(() => {
+        (w.webContents as any).beginSharedTextureSubscription({ fps: 0 });
+      }).to.throw('fps must be between 1 and 60');
+    });
+
+    ifit(process.platform === 'win32')('emits shared texture frames and reports stats', async function () {
+      this.timeout(30000);
+
+      const w = new BrowserWindow({
+        show: true,
+        width: 320,
+        height: 240,
+        webPreferences: {
+          backgroundThrottling: false
+        }
+      });
+      await w.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`
+        <!doctype html>
+        <meta charset="utf-8">
+        <style>
+          html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+          body { background: #263238; }
+          #box { width: 96px; height: 96px; background: #4dd0e1; }
+        </style>
+        <div id="box"></div>
+        <script>
+          let x = 0;
+          function tick() {
+            x = (x + 1) % 160;
+            document.getElementById('box').style.transform = 'translateX(' + x + 'px)';
+            requestAnimationFrame(tick);
+          }
+          requestAnimationFrame(tick);
+        </script>
+      `)}`);
+
+      let stream: any;
+      try {
+        stream = (w.webContents as any).beginSharedTextureSubscription({
+          fps: 10,
+          pixelFormat: 'bgra'
+        });
+      } catch (error: any) {
+        if (/requires hardware acceleration/.test(error.message)) {
+          return this.skip();
+        }
+        throw error;
+      }
+
+      let streamError: Error | null = null;
+      stream.on('error', (error: Error) => {
+        streamError = error;
+      });
+
+      const frame: any = await Promise.race([
+        once(stream, 'frame').then(([capturedFrame]) => capturedFrame),
+        setTimeout(10000).then(() => {
+          throw new Error('Timed out while waiting for shared texture stream frame');
+        })
+      ]);
+
+      if (streamError) {
+        const message = String((streamError as any).message || streamError);
+        if (/not backed by a GPU memory buffer/.test(message)) {
+          stream.stop();
+          return this.skip();
+        }
+        throw streamError;
+      }
+
+      expect(frame.textureInfo.pixelFormat).to.equal('bgra');
+      expect(Buffer.isBuffer(frame.textureInfo.handle.ntHandle)).to.equal(true);
+      frame.release();
+      await setTimeout(0);
+      stream.stop();
+
+      const stats = stream.getStats();
+      expect(stats.nativeCapturerCreateCount).to.equal(1);
+      expect(stats.deliveredFrames).to.be.greaterThan(0);
+      expect(stats.releasedFrames).to.be.greaterThan(0);
+      expect(stats.currentInFlightFrames).to.equal(0);
+      expect(stats.stopped).to.equal(true);
+    });
+
+    ifit(process.platform === 'win32')('drops stream frames while the previous frame is unreleased', async function () {
+      this.timeout(30000);
+
+      const w = new BrowserWindow({
+        show: true,
+        width: 320,
+        height: 240,
+        webPreferences: {
+          backgroundThrottling: false
+        }
+      });
+      await w.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`
+        <!doctype html>
+        <meta charset="utf-8">
+        <style>
+          html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+          body { background: #102027; }
+          #box { width: 96px; height: 96px; background: #ff7043; }
+        </style>
+        <div id="box"></div>
+        <script>
+          let x = 0;
+          function tick() {
+            x = (x + 3) % 160;
+            document.getElementById('box').style.transform = 'translateX(' + x + 'px)';
+            requestAnimationFrame(tick);
+          }
+          requestAnimationFrame(tick);
+        </script>
+      `)}`);
+
+      let stream: any;
+      try {
+        stream = (w.webContents as any).beginSharedTextureSubscription({
+          fps: 30,
+          pixelFormat: 'bgra'
+        });
+      } catch (error: any) {
+        if (/requires hardware acceleration/.test(error.message)) {
+          return this.skip();
+        }
+        throw error;
+      }
+
+      let streamError: Error | null = null;
+      stream.on('error', (error: Error) => {
+        streamError = error;
+      });
+
+      const frame: any = await Promise.race([
+        once(stream, 'frame').then(([capturedFrame]) => capturedFrame),
+        setTimeout(10000).then(() => {
+          throw new Error('Timed out while waiting for shared texture stream frame');
+        })
+      ]);
+
+      await setTimeout(500);
+      if (streamError) {
+        const message = String((streamError as any).message || streamError);
+        if (/not backed by a GPU memory buffer/.test(message)) {
+          stream.stop();
+          return this.skip();
+        }
+        throw streamError;
+      }
+
+      const backpressuredStats = stream.getStats();
+      expect(backpressuredStats.currentInFlightFrames).to.equal(1);
+      expect(backpressuredStats.droppedBackpressureFrames).to.be.greaterThan(0);
+
+      const nextFramePromise = once(stream, 'frame').then(([capturedFrame]) => capturedFrame);
+      frame.release();
+      const nextFrame: any = await Promise.race([
+        nextFramePromise,
+        setTimeout(10000).then(() => {
+          throw new Error('Timed out while waiting for shared texture stream frame after release');
+        })
+      ]);
+      nextFrame.release();
+      await setTimeout(0);
+      stream.stop();
+
+      const finalStats = stream.getStats();
+      expect(finalStats.currentInFlightFrames).to.equal(0);
+      expect(finalStats.deliveredFrames).to.be.greaterThan(1);
+    });
+  });
+
   describe('BrowserWindow.setProgressBar(progress)', () => {
     let w: BrowserWindow;
     before(() => {
