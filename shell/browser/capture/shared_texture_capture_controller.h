@@ -53,6 +53,9 @@ class SharedTextureCaptureController
 
   bool IsCapturePendingForTesting() const;
   bool HasUnreleasedFrameForTesting() const;
+  int NativeCapturerCreateCountForTesting() const;
+  int CapturedFrameCountForTesting() const;
+  int UnexpectedFrameDoneCountForTesting() const;
 
  private:
   enum class State {
@@ -86,6 +89,9 @@ class SharedTextureCaptureController
   State state_ = State::kIdle;
   uint64_t capture_id_ = 0;
   CompletionCallback callback_;
+  int native_capturer_create_count_ = 0;
+  int captured_frame_count_ = 0;
+  int unexpected_frame_done_count_ = 0;
 
   base::WeakPtrFactory<SharedTextureCaptureController> weak_factory_{this};
 };

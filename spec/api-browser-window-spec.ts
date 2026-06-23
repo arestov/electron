@@ -2942,6 +2942,61 @@ describe('BrowserWindow module', () => {
       expect(w.isVisible()).to.equal(false);
     });
 
+    ifit(process.platform === 'win32')('reuses the native capturer across repeated captures', async function () {
+      this.timeout(30000);
+
+      const w = new BrowserWindow({
+        show: true,
+        width: 320,
+        height: 240,
+        webPreferences: {
+          backgroundThrottling: false
+        }
+      });
+      await w.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`
+        <!doctype html>
+        <meta charset="utf-8">
+        <style>
+          html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+          body { background: #263238; }
+          #box { width: 96px; height: 96px; background: #ffca28; }
+        </style>
+        <div id="box"></div>
+        <script>
+          let x = 0;
+          function tick() {
+            x = (x + 1) % 160;
+            document.getElementById('box').style.transform = 'translateX(' + x + 'px)';
+            requestAnimationFrame(tick);
+          }
+          requestAnimationFrame(tick);
+        </script>
+      `)}`);
+
+      try {
+        for (let i = 0; i < 12; i++) {
+          const texture = await (w.webContents as any).captureNextSharedTexture({
+            timeoutMs: 5000,
+            pixelFormat: 'bgra'
+          });
+          texture.release();
+        }
+      } catch (error: any) {
+        if (
+          /requires hardware acceleration|not backed by a GPU memory buffer|Timed out while waiting/.test(error.message)
+        ) {
+          return this.skip();
+        }
+        throw error;
+      }
+
+      const stats = (w.webContents as any)._getSharedTextureCaptureStatsForTesting();
+      expect(stats.nativeCapturerCreateCount).to.equal(1);
+      expect(stats.capturedFrameCount).to.be.greaterThanOrEqual(12);
+      expect(stats.capturePending).to.equal(false);
+      expect(stats.frameInFlight).to.equal(false);
+    });
+
     ifit(process.platform === 'win32')('returns a shared texture that can be imported and released', async function () {
       this.timeout(20000);
 

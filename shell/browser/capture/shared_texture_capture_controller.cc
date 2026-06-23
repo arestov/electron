@@ -65,6 +65,7 @@ void SharedTextureCaptureController::CaptureNext(Options options,
       RejectPending("Failed to create frame sink video capturer");
       return;
     }
+    ++native_capturer_create_count_;
 
     video_capturer_->SetAutoThrottlingEnabled(false);
     video_capturer_->SetMinSizeChangePeriod(base::TimeDelta());
@@ -108,6 +109,19 @@ bool SharedTextureCaptureController::HasUnreleasedFrameForTesting() const {
   return state_ == State::kFrameInFlight;
 }
 
+int SharedTextureCaptureController::NativeCapturerCreateCountForTesting()
+    const {
+  return native_capturer_create_count_;
+}
+
+int SharedTextureCaptureController::CapturedFrameCountForTesting() const {
+  return captured_frame_count_;
+}
+
+int SharedTextureCaptureController::UnexpectedFrameDoneCountForTesting() const {
+  return unexpected_frame_done_count_;
+}
+
 void SharedTextureCaptureController::OnFrameCaptured(
     ::media::mojom::VideoBufferHandlePtr data,
     ::media::mojom::VideoFrameInfoPtr info,
@@ -115,6 +129,7 @@ void SharedTextureCaptureController::OnFrameCaptured(
     mojo::PendingRemote<viz::mojom::FrameSinkVideoConsumerFrameCallbacks>
         callbacks) {
   if (state_ != State::kWaitingForFrame) {
+    ++unexpected_frame_done_count_;
     mojo::Remote<viz::mojom::FrameSinkVideoConsumerFrameCallbacks>
         callbacks_remote(std::move(callbacks));
     callbacks_remote->Done();
@@ -151,6 +166,7 @@ void SharedTextureCaptureController::OnFrameCaptured(
       base::BindOnce(&SharedTextureCaptureController::OnTextureReleased,
                      weak_factory_.GetWeakPtr()));
 
+  ++captured_frame_count_;
   PauseCapture();
   state_ = State::kFrameInFlight;
   std::move(callback_).Run(std::move(texture), std::string());

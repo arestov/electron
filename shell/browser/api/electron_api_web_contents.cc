@@ -4044,6 +4044,33 @@ v8::Local<v8::Promise> WebContents::CaptureNextSharedTexture(
   return handle;
 }
 
+v8::Local<v8::Value> WebContents::GetSharedTextureCaptureStatsForTesting(
+    v8::Isolate* isolate) {
+  gin_helper::Dictionary dict(isolate, v8::Object::New(isolate));
+  if (!shared_texture_capture_controller_) {
+    dict.Set("nativeCapturerCreateCount", 0);
+    dict.Set("capturedFrameCount", 0);
+    dict.Set("unexpectedFrameDoneCount", 0);
+    dict.Set("capturePending", false);
+    dict.Set("frameInFlight", false);
+    return dict.GetHandle();
+  }
+
+  dict.Set("nativeCapturerCreateCount",
+           shared_texture_capture_controller_
+               ->NativeCapturerCreateCountForTesting());
+  dict.Set("capturedFrameCount",
+           shared_texture_capture_controller_->CapturedFrameCountForTesting());
+  dict.Set("unexpectedFrameDoneCount",
+           shared_texture_capture_controller_
+               ->UnexpectedFrameDoneCountForTesting());
+  dict.Set("capturePending",
+           shared_texture_capture_controller_->IsCapturePendingForTesting());
+  dict.Set("frameInFlight",
+           shared_texture_capture_controller_->HasUnreleasedFrameForTesting());
+  return dict.GetHandle();
+}
+
 bool WebContents::IsBeingCaptured() {
   return web_contents()->IsBeingCaptured();
 }
@@ -5016,6 +5043,8 @@ void WebContents::FillObjectTemplate(v8::Isolate* isolate,
       .SetMethod("capturePage", &WebContents::CapturePage)
       .SetMethod("captureNextSharedTexture",
                  &WebContents::CaptureNextSharedTexture)
+      .SetMethod("_getSharedTextureCaptureStatsForTesting",
+                 &WebContents::GetSharedTextureCaptureStatsForTesting)
       .SetMethod("setEmbedder", &WebContents::SetEmbedder)
       .SetMethod("setDevToolsWebContents", &WebContents::SetDevToolsWebContents)
       .SetMethod("isBeingCaptured", &WebContents::IsBeingCaptured)

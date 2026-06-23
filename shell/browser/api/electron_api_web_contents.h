@@ -313,6 +313,8 @@ class WebContents final : public ExclusiveAccessContext,
   // done.
   v8::Local<v8::Promise> CapturePage(gin::Arguments* args);
   v8::Local<v8::Promise> CaptureNextSharedTexture(gin::Arguments* args);
+  v8::Local<v8::Value> GetSharedTextureCaptureStatsForTesting(
+      v8::Isolate* isolate);
 
   // Methods for creating <webview>.
   [[nodiscard]] bool is_guest() const { return type_ == Type::kWebView; }
