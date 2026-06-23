@@ -10,16 +10,12 @@
 #include <string>
 
 #include "base/functional/callback_forward.h"
-#include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
-#include "components/viz/host/client_frame_sink_video_capturer.h"
-#include "content/public/common/widget_type.h"
 #include "media/base/video_types.h"
-#include "media/capture/mojom/video_capture_buffer.mojom-forward.h"
-#include "media/capture/mojom/video_capture_types.mojom.h"
 #include "shell/browser/capture/captured_shared_texture.h"
+#include "shell/browser/capture/shared_texture_frame_producer.h"
 
 namespace content {
 class WebContents;
@@ -28,7 +24,7 @@ class WebContents;
 namespace electron {
 
 class SharedTextureCaptureController
-    : public viz::mojom::FrameSinkVideoConsumer {
+    : public SharedTextureFrameProducer::Delegate {
  public:
   struct Options {
     base::TimeDelta timeout = base::Milliseconds(250);
@@ -64,34 +60,18 @@ class SharedTextureCaptureController
     kFrameInFlight,
   };
 
-  void OnFrameCaptured(
-      ::media::mojom::VideoBufferHandlePtr data,
-      ::media::mojom::VideoFrameInfoPtr info,
-      const gfx::Rect& content_rect,
-      mojo::PendingRemote<viz::mojom::FrameSinkVideoConsumerFrameCallbacks>
-          callbacks) override;
-  void OnNewCaptureVersion(
-      const media::CaptureVersion& capture_version) override {}
-  void OnFrameWithEmptyRegionCapture() override {}
-  void OnStopped() override {}
-  void OnLog(const std::string& message) override {}
+  bool OnSharedTextureFrame(CapturedSharedTextureValue texture) override;
+  void OnSharedTextureError(std::string message) override;
+  void OnSharedTextureFrameReleased() override;
 
-  void StopCapture();
-  void PauseCapture();
   void RejectPending(std::string message);
   void OnTimeout(uint64_t capture_id);
-  void OnTextureReleased();
 
   raw_ptr<content::WebContents> web_contents_ = nullptr;
-  std::unique_ptr<viz::ClientFrameSinkVideoCapturer> video_capturer_;
-  bool video_capturer_started_ = false;
-  base::ScopedClosureRunner capturer_count_;
+  std::unique_ptr<SharedTextureFrameProducer> producer_;
   State state_ = State::kIdle;
   uint64_t capture_id_ = 0;
   CompletionCallback callback_;
-  int native_capturer_create_count_ = 0;
-  int captured_frame_count_ = 0;
-  int unexpected_frame_done_count_ = 0;
 
   base::WeakPtrFactory<SharedTextureCaptureController> weak_factory_{this};
 };
