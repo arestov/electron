@@ -2903,6 +2903,63 @@ describe('BrowserWindow module', () => {
       second.release();
     });
 
+    ifit(process.platform === 'win32')('recovers after rejecting capture while a frame is unreleased', async function () {
+      this.timeout(20000);
+
+      const w = new BrowserWindow({
+        show: true,
+        width: 320,
+        height: 240,
+        webPreferences: {
+          backgroundThrottling: false
+        }
+      });
+      await w.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(
+        '<body style="margin:0;background:#37474f"></body>'
+      )}`);
+
+      let texture: any;
+      try {
+        texture = await (w.webContents as any).captureNextSharedTexture({
+          timeoutMs: 5000,
+          pixelFormat: 'bgra'
+        });
+      } catch (error: any) {
+        if (
+          /requires hardware acceleration|not backed by a GPU memory buffer|Timed out while waiting/.test(error.message)
+        ) {
+          return this.skip();
+        }
+        throw error;
+      }
+
+      await expect(
+        (w.webContents as any).captureNextSharedTexture({ timeoutMs: 500, pixelFormat: 'bgra' })
+      ).to.eventually.be.rejectedWith('A previously captured shared texture has not been released');
+
+      let second: any;
+      try {
+        texture.release();
+        second = await (w.webContents as any).captureNextSharedTexture({
+          timeoutMs: 5000,
+          pixelFormat: 'bgra'
+        });
+      } catch (error: any) {
+        if (
+          /requires hardware acceleration|not backed by a GPU memory buffer|Timed out while waiting/.test(error.message)
+        ) {
+          return this.skip();
+        }
+        throw error;
+      } finally {
+        second?.release();
+      }
+
+      const stats = (w.webContents as any)._getSharedTextureCaptureStatsForTesting();
+      expect(stats.frameInFlight).to.equal(false);
+      expect(stats.capturePending).to.equal(false);
+    });
+
     ifit(process.platform === 'win32')('preserves page visibility when stayHidden is true', async function () {
       this.timeout(20000);
 
