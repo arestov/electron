@@ -74,12 +74,14 @@ class SharedTextureCaptureController
   void OnLog(const std::string& message) override {}
 
   void StopCapture();
+  void PauseCapture();
   void RejectPending(std::string message);
   void OnTimeout(uint64_t capture_id);
   void OnTextureReleased();
 
   raw_ptr<content::WebContents> web_contents_ = nullptr;
   std::unique_ptr<viz::ClientFrameSinkVideoCapturer> video_capturer_;
+  bool video_capturer_started_ = false;
   base::ScopedClosureRunner capturer_count_;
   State state_ = State::kIdle;
   uint64_t capture_id_ = 0;

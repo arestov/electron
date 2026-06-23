@@ -9,6 +9,8 @@
 namespace electron {
 
 SharedTextureReleaserHolder::~SharedTextureReleaserHolder() {
+  if (releaser.is_bound())
+    releaser->Done();
   if (on_release)
     std::move(on_release).Run();
 }

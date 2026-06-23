@@ -7,6 +7,7 @@
 
 #include "base/functional/callback_helpers.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/viz/privileged/mojom/compositing/frame_sink_video_capture.mojom.h"
 #include "ui/gfx/gpu_memory_buffer_handle.h"
 
@@ -29,8 +30,7 @@ struct SharedTextureReleaserHolder {
   gfx::GpuMemoryBufferHandle gmb_handle;
 
   // Releaser, hold this to prevent FrameSinkVideoCapturer from recycling frame.
-  mojo::PendingRemote<viz::mojom::FrameSinkVideoConsumerFrameCallbacks>
-      releaser;
+  mojo::Remote<viz::mojom::FrameSinkVideoConsumerFrameCallbacks> releaser;
 
   base::OnceClosure on_release;
 };

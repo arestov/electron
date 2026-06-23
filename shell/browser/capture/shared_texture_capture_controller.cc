@@ -14,6 +14,7 @@
 #include "content/public/browser/web_contents.h"
 #include "media/base/video_frame_metadata.h"
 #include "media/capture/mojom/video_capture_buffer.mojom.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/viz/privileged/mojom/compositing/frame_sink_video_capture.mojom-shared.h"
 #include "shell/browser/capture/shared_texture_frame_info.h"
 #include "ui/gfx/geometry/size_conversions.h"
@@ -58,17 +59,19 @@ void SharedTextureCaptureController::CaptureNext(Options options,
     return;
   }
 
-  video_capturer_ = view->CreateVideoCapturer();
   if (!video_capturer_) {
-    RejectPending("Failed to create frame sink video capturer");
-    return;
-  }
+    video_capturer_ = view->CreateVideoCapturer();
+    if (!video_capturer_) {
+      RejectPending("Failed to create frame sink video capturer");
+      return;
+    }
 
-  video_capturer_->SetAutoThrottlingEnabled(false);
-  video_capturer_->SetMinSizeChangePeriod(base::TimeDelta());
+    video_capturer_->SetAutoThrottlingEnabled(false);
+    video_capturer_->SetMinSizeChangePeriod(base::TimeDelta());
+    video_capturer_->SetAnimationFpsLockIn(false, 1);
+  }
   video_capturer_->SetMinCapturePeriod(base::Hertz(60));
   video_capturer_->SetFormat(options.pixel_format);
-  video_capturer_->SetAnimationFpsLockIn(false, 1);
   // Unlike OSR, normal onscreen frame sinks need exact constraints here to
   // reliably produce a requested refresh frame.
   const gfx::Size view_size = gfx::ToRoundedSize(gfx::ScaleSize(
@@ -89,8 +92,11 @@ void SharedTextureCaptureController::CaptureNext(Options options,
       base::BindOnce(&SharedTextureCaptureController::OnTimeout,
                      weak_factory_.GetWeakPtr(), capture_id),
       options.timeout);
-  video_capturer_->Start(
-      this, viz::mojom::BufferFormatPreference::kPreferMappableSharedImage);
+  if (!video_capturer_started_) {
+    video_capturer_->Start(
+        this, viz::mojom::BufferFormatPreference::kPreferMappableSharedImage);
+    video_capturer_started_ = true;
+  }
   video_capturer_->RequestRefreshFrame();
 }
 
@@ -108,24 +114,28 @@ void SharedTextureCaptureController::OnFrameCaptured(
     const gfx::Rect& content_rect,
     mojo::PendingRemote<viz::mojom::FrameSinkVideoConsumerFrameCallbacks>
         callbacks) {
-  if (state_ != State::kWaitingForFrame)
+  if (state_ != State::kWaitingForFrame) {
+    mojo::Remote<viz::mojom::FrameSinkVideoConsumerFrameCallbacks>
+        callbacks_remote(std::move(callbacks));
+    callbacks_remote->Done();
     return;
+  }
 
   if (!data || !info) {
-    StopCapture();
+    PauseCapture();
     RejectPending("Captured shared texture frame data is missing");
     return;
   }
 
   if (!data->is_gpu_memory_buffer_handle()) {
-    StopCapture();
+    PauseCapture();
     RejectPending("Captured frame is not backed by a GPU memory buffer");
     return;
   }
 
   auto& orig_handle = data->get_gpu_memory_buffer_handle();
   if (orig_handle.is_null()) {
-    StopCapture();
+    PauseCapture();
     RejectPending("Captured GPU memory buffer handle is null");
     return;
   }
@@ -141,7 +151,7 @@ void SharedTextureCaptureController::OnFrameCaptured(
       base::BindOnce(&SharedTextureCaptureController::OnTextureReleased,
                      weak_factory_.GetWeakPtr()));
 
-  StopCapture();
+  PauseCapture();
   state_ = State::kFrameInFlight;
   std::move(callback_).Run(std::move(texture), std::string());
 }
@@ -150,12 +160,19 @@ void SharedTextureCaptureController::StopCapture() {
   if (video_capturer_)
     video_capturer_->Stop();
   video_capturer_.reset();
+  video_capturer_started_ = false;
+  capturer_count_.RunAndReset();
+}
+
+void SharedTextureCaptureController::PauseCapture() {
+  if (video_capturer_)
+    video_capturer_->SetMinCapturePeriod(base::Seconds(3600));
   capturer_count_.RunAndReset();
 }
 
 void SharedTextureCaptureController::RejectPending(std::string message) {
   state_ = State::kIdle;
-  StopCapture();
+  PauseCapture();
   ++capture_id_;
   if (callback_)
     std::move(callback_).Run(std::nullopt, std::move(message));
