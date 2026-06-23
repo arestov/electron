@@ -98,6 +98,7 @@
 #include "shell/browser/api/electron_api_browser_window.h"
 #include "shell/browser/api/electron_api_debugger.h"
 #include "shell/browser/api/electron_api_session.h"
+#include "shell/browser/api/electron_api_shared_texture_subscription.h"
 #include "shell/browser/api/electron_api_web_frame_main.h"
 #include "shell/browser/api/frame_subscriber.h"
 #include "shell/browser/api/message_port.h"
@@ -2571,6 +2572,10 @@ content::WebContents* WebContents::GetDevToolsWebContents() const {
 }
 
 void WebContents::WebContentsDestroyed() {
+  if (active_shared_texture_subscription_) {
+    active_shared_texture_subscription_->Stop();
+    active_shared_texture_subscription_ = nullptr;
+  }
   shared_texture_capture_controller_.reset();
 
   // Clear the pointer stored in wrapper.
@@ -3980,6 +3985,13 @@ v8::Local<v8::Promise> WebContents::CaptureNextSharedTexture(
   gin_helper::Promise<CapturedSharedTextureValue> promise(args->isolate());
   v8::Local<v8::Promise> handle = promise.GetHandle();
 
+  if (active_shared_texture_subscription_ &&
+      !active_shared_texture_subscription_->is_stopped()) {
+    promise.RejectWithErrorMessage(
+        "A shared texture subscription is already active");
+    return handle;
+  }
+
   SharedTextureCaptureController::Options capture_options;
   int timeout_ms = capture_options.timeout.InMilliseconds();
   gin_helper::Dictionary options;
@@ -4042,6 +4054,70 @@ v8::Local<v8::Promise> WebContents::CaptureNextSharedTexture(
           std::move(promise)));
 
   return handle;
+}
+
+v8::Local<v8::Value> WebContents::BeginSharedTextureSubscription(
+    gin::Arguments* args) {
+  v8::Isolate* isolate = args->isolate();
+  gin_helper::ErrorThrower thrower(isolate);
+
+  if (active_shared_texture_subscription_ &&
+      !active_shared_texture_subscription_->is_stopped()) {
+    thrower.ThrowError("A shared texture subscription is already active");
+    return v8::Undefined(isolate);
+  }
+
+  if (shared_texture_capture_controller_ &&
+      shared_texture_capture_controller_->HasUnreleasedFrameForTesting()) {
+    thrower.ThrowError(
+        "A previously captured shared texture has not been released");
+    return v8::Undefined(isolate);
+  }
+
+  SharedTextureSubscription::Options subscription_options;
+  gin_helper::Dictionary options;
+  if (args->GetNext(&options)) {
+    options.Get("fps", &subscription_options.fps);
+    options.Get("stayHidden", &subscription_options.stay_hidden);
+    options.Get("stayAwake", &subscription_options.stay_awake);
+
+    std::string pixel_format;
+    if (options.Get("pixelFormat", &pixel_format)) {
+      if (pixel_format == "bgra") {
+        subscription_options.pixel_format = media::PIXEL_FORMAT_ARGB;
+      } else if (pixel_format == "rgba") {
+        subscription_options.pixel_format = media::PIXEL_FORMAT_ABGR;
+      } else if (pixel_format == "rgbaf16") {
+        subscription_options.pixel_format = media::PIXEL_FORMAT_RGBAF16;
+      } else {
+        thrower.ThrowError("pixelFormat must be one of: bgra, rgba, rgbaf16");
+        return v8::Undefined(isolate);
+      }
+    }
+  }
+
+  if (subscription_options.fps <= 0 || subscription_options.fps > 60) {
+    thrower.ThrowError("fps must be between 1 and 60");
+    return v8::Undefined(isolate);
+  }
+
+  if (!web_contents()->GetRenderWidgetHostView()) {
+    thrower.ThrowError("WebContents has no RenderWidgetHostView");
+    return v8::Undefined(isolate);
+  }
+
+  if (content::GpuDataManager::Initialized() &&
+      !content::GpuDataManager::GetInstance()->HardwareAccelerationEnabled()) {
+    thrower.ThrowError(
+        "beginSharedTextureSubscription requires hardware acceleration");
+    return v8::Undefined(isolate);
+  }
+
+  auto* subscription = SharedTextureSubscription::Create(
+      isolate, web_contents(), subscription_options);
+  active_shared_texture_subscription_ = subscription;
+  subscription->Start();
+  return subscription->GetWrapper(isolate).ToLocalChecked();
 }
 
 v8::Local<v8::Value> WebContents::GetSharedTextureCaptureStatsForTesting(
@@ -5043,6 +5119,8 @@ void WebContents::FillObjectTemplate(v8::Isolate* isolate,
       .SetMethod("capturePage", &WebContents::CapturePage)
       .SetMethod("captureNextSharedTexture",
                  &WebContents::CaptureNextSharedTexture)
+      .SetMethod("beginSharedTextureSubscription",
+                 &WebContents::BeginSharedTextureSubscription)
       .SetMethod("_getSharedTextureCaptureStatsForTesting",
                  &WebContents::GetSharedTextureCaptureStatsForTesting)
       .SetMethod("setEmbedder", &WebContents::SetEmbedder)

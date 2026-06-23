@@ -190,9 +190,10 @@ void SharedTextureFrameProducer::OnFrameCaptured(
       base::BindOnce(&SharedTextureFrameProducer::OnTextureReleased,
                      weak_factory_.GetWeakPtr()));
 
-  auto* releaser_holder = texture.releaser_holder;
+  auto* releaser_holder = texture.releaser_holder.get();
   if (!delegate_->OnSharedTextureFrame(std::move(texture))) {
     ++stats_.unexpected_frame_done_count;
+    releaser_holder->on_release.Reset();
     delete releaser_holder;
     return;
   }

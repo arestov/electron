@@ -114,6 +114,7 @@ class BaseWindow;
 class Debugger;
 class FrameSubscriber;
 class Session;
+class SharedTextureSubscription;
 
 // Wrapper around the content::WebContents.
 class WebContents final : public ExclusiveAccessContext,
@@ -313,6 +314,7 @@ class WebContents final : public ExclusiveAccessContext,
   // done.
   v8::Local<v8::Promise> CapturePage(gin::Arguments* args);
   v8::Local<v8::Promise> CaptureNextSharedTexture(gin::Arguments* args);
+  v8::Local<v8::Value> BeginSharedTextureSubscription(gin::Arguments* args);
   v8::Local<v8::Value> GetSharedTextureCaptureStatsForTesting(
       v8::Isolate* isolate);
 
@@ -809,6 +811,8 @@ class WebContents final : public ExclusiveAccessContext,
   std::unique_ptr<FrameSubscriber> frame_subscriber_;
   std::unique_ptr<SharedTextureCaptureController>
       shared_texture_capture_controller_;
+  cppgc::Persistent<SharedTextureSubscription>
+      active_shared_texture_subscription_;
 
 #if BUILDFLAG(ENABLE_ELECTRON_EXTENSIONS)
   std::unique_ptr<extensions::ScriptExecutor> script_executor_;

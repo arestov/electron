@@ -35,6 +35,7 @@ enum ElectronWrappablePointerTag : uint16_t {
   kElectronScreen,                  // electron::api::Screen
   kElectronServiceWorkerContext,    // electron::api::ServiceWorkerContext
   kElectronSession,                 // electron::api::Session
+  kElectronSharedTextureSubscription,  // electron::api::SharedTextureSubscription
   kElectronSimpleURLLoaderWrapper,  // electron::api::SimpleURLLoaderWrapper
   kElectronTray,                    // electron::api::Tray
   kElectronUtilityProcess,          // electron::api::UtilityProcessWrapper
