@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/memory/raw_ptr.h"
+#include "gin/arguments.h"
 #include "gin/wrappable.h"
 #include "shell/browser/capture/captured_shared_texture.h"
 #include "shell/browser/capture/shared_texture_frame_producer.h"
@@ -63,6 +64,7 @@ class SharedTextureSubscription final
   void Pause();
   void Resume();
   void Stop();
+  void SetFrameRate(gin::Arguments* args);
   v8::Local<v8::Value> GetStats(v8::Isolate* isolate) const;
 
   [[nodiscard]] bool is_stopped() const { return state_ == State::kStopped; }
@@ -83,6 +85,7 @@ class SharedTextureSubscription final
   void EmitStoppedOnce();
 
   Options options_;
+  int target_frame_rate_ = 20;
   std::unique_ptr<SharedTextureFrameProducer> producer_;
   State state_ = State::kIdle;
   int in_flight_frames_ = 0;

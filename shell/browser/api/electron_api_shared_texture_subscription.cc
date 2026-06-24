@@ -7,9 +7,11 @@
 #include <utility>
 
 #include "cppgc/allocation.h"
+#include "gin/arguments.h"
 #include "gin/dictionary.h"
 #include "gin/object_template_builder.h"
 #include "shell/browser/javascript_environment.h"
+#include "shell/common/gin_helper/error_thrower.h"
 #include "shell/common/gin_converters/captured_shared_texture_converter.h"
 #include "shell/common/gin_converters/value_converter.h"
 #include "shell/common/gin_helper/dictionary.h"
@@ -24,6 +26,7 @@ SharedTextureSubscription::SharedTextureSubscription(
     content::WebContents* web_contents,
     Options options)
     : options_(options),
+      target_frame_rate_(options_.fps),
       producer_(std::make_unique<SharedTextureFrameProducer>(web_contents,
                                                              this)) {}
 
@@ -79,6 +82,21 @@ void SharedTextureSubscription::Stop() {
   EmitStoppedOnce();
 }
 
+void SharedTextureSubscription::SetFrameRate(gin::Arguments* args) {
+  v8::Isolate* isolate = args->isolate();
+  gin_helper::ErrorThrower thrower(isolate);
+  int fps = 0;
+  if (!args->GetNext(&fps) || fps <= 0 || fps > 60) {
+    thrower.ThrowError("fps must be between 1 and 60");
+    return;
+  }
+
+  target_frame_rate_ = fps;
+  options_.fps = fps;
+  if (state_ == State::kStreaming || state_ == State::kPaused)
+    producer_->SetFrameRate(fps);
+}
+
 v8::Local<v8::Value> SharedTextureSubscription::GetStats(
     v8::Isolate* isolate) const {
   gin_helper::Dictionary dict(isolate, v8::Object::New(isolate));
@@ -92,6 +110,7 @@ v8::Local<v8::Value> SharedTextureSubscription::GetStats(
            producer_stats.unexpected_frame_done_count);
   dict.Set("currentInFlightFrames", in_flight_frames_);
   dict.Set("maxInFlightFrames", 1);
+  dict.Set("targetFrameRate", target_frame_rate_);
   dict.Set("nativeCapturerCreateCount",
            producer_stats.native_capturer_create_count);
   dict.Set("errorCount", error_count_);
@@ -145,6 +164,7 @@ gin::ObjectTemplateBuilder SharedTextureSubscription::GetObjectTemplateBuilder(
       .SetMethod("pause", &SharedTextureSubscription::Pause)
       .SetMethod("resume", &SharedTextureSubscription::Resume)
       .SetMethod("stop", &SharedTextureSubscription::Stop)
+      .SetMethod("setFrameRate", &SharedTextureSubscription::SetFrameRate)
       .SetMethod("getStats", &SharedTextureSubscription::GetStats);
 }
 

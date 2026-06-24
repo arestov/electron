@@ -3201,6 +3201,20 @@ describe('BrowserWindow module', () => {
       }).to.throw('output.maxSize width and height must be between 1 and 8192');
     });
 
+    ifit(process.platform === 'win32')('rejects invalid runtime fps values', async function () {
+      const w = new BrowserWindow({
+        show: true,
+        width: 320,
+        height: 240
+      });
+      await w.loadURL('data:text/html,<body>fps validation</body>');
+      const stream = (w.webContents as any).beginSharedTextureSubscription();
+      expect(() => {
+        stream.setFrameRate(0);
+      }).to.throw('fps must be between 1 and 60');
+      stream.stop();
+    });
+
     ifit(process.platform === 'win32')('emits shared texture frames and reports stats', async function () {
       this.timeout(30000);
 
@@ -3342,6 +3356,87 @@ describe('BrowserWindow module', () => {
       expect(frame.textureInfo.codedSize.height).to.be.at.most(160);
       frame.release();
       stream.stop();
+    });
+
+    ifit(process.platform === 'win32')('updates frame rate while streaming', async function () {
+      this.timeout(30000);
+
+      const w = new BrowserWindow({
+        show: true,
+        width: 320,
+        height: 240,
+        webPreferences: {
+          backgroundThrottling: false
+        }
+      });
+      await w.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`
+        <!doctype html>
+        <meta charset="utf-8">
+        <style>
+          html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+          body { background: #111827; }
+          #box { width: 80px; height: 80px; background: #a78bfa; }
+        </style>
+        <div id="box"></div>
+        <script>
+          let x = 0;
+          function tick() {
+            x = (x + 2) % 160;
+            document.getElementById('box').style.transform = 'translateX(' + x + 'px)';
+            requestAnimationFrame(tick);
+          }
+          requestAnimationFrame(tick);
+        </script>
+      `)}`);
+
+      let stream: any;
+      try {
+        stream = (w.webContents as any).beginSharedTextureSubscription({
+          fps: 5,
+          pixelFormat: 'bgra'
+        });
+      } catch (error: any) {
+        if (/requires hardware acceleration/.test(error.message)) {
+          return this.skip();
+        }
+        throw error;
+      }
+
+      let streamError: Error | null = null;
+      stream.on('error', (error: Error) => {
+        streamError = error;
+      });
+
+      const firstFrame: any = await Promise.race([
+        once(stream, 'frame').then(([capturedFrame]) => capturedFrame),
+        setTimeout(10000).then(() => {
+          throw new Error('Timed out while waiting for initial shared texture stream frame');
+        })
+      ]);
+      firstFrame.release();
+
+      stream.setFrameRate(12);
+      expect(stream.getStats().targetFrameRate).to.equal(12);
+
+      const nextFrame: any = await Promise.race([
+        once(stream, 'frame').then(([capturedFrame]) => capturedFrame),
+        setTimeout(10000).then(() => {
+          throw new Error('Timed out while waiting for frame after setFrameRate');
+        })
+      ]);
+
+      if (streamError) {
+        const message = String((streamError as any).message || streamError);
+        if (/not backed by a GPU memory buffer/.test(message)) {
+          stream.stop();
+          return this.skip();
+        }
+        throw streamError;
+      }
+
+      nextFrame.release();
+      stream.stop();
+      expect(stream.getStats().targetFrameRate).to.equal(12);
     });
 
     ifit(process.platform === 'win32')('drops stream frames while the previous frame is unreleased', async function () {
