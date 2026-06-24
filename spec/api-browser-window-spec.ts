@@ -3291,6 +3291,12 @@ describe('BrowserWindow module', () => {
       expect(stats.deliveredFrames).to.be.greaterThan(0);
       expect(stats.releasedFrames).to.be.greaterThan(0);
       expect(stats.currentInFlightFrames).to.equal(0);
+      expect(stats.targetFrameRate).to.equal(10);
+      expect(stats.outputMode).to.equal('source-size');
+      expect(stats.preserveAspectRatio).to.equal(true);
+      expect(stats.lastFrameTimestamp).to.be.a('number');
+      expect(stats.lastFrameCodedSize.width).to.be.greaterThan(0);
+      expect(stats.lastFrameCodedSize.height).to.be.greaterThan(0);
       expect(stats.stopped).to.equal(true);
     });
 
@@ -3356,6 +3362,11 @@ describe('BrowserWindow module', () => {
       expect(frame.textureInfo.codedSize.height).to.be.at.most(160);
       frame.release();
       stream.stop();
+      const stats = stream.getStats();
+      expect(stats.outputMode).to.equal('max-bounds');
+      expect(stats.outputSize).to.deep.equal({ width: 160, height: 160 });
+      expect(stats.lastFrameCodedSize.width).to.be.at.most(160);
+      expect(stats.lastFrameCodedSize.height).to.be.at.most(160);
     });
 
     ifit(process.platform === 'win32')('updates frame rate while streaming', async function () {
@@ -3437,6 +3448,35 @@ describe('BrowserWindow module', () => {
       nextFrame.release();
       stream.stop();
       expect(stream.getStats().targetFrameRate).to.equal(12);
+    });
+
+    ifit(process.platform === 'win32')('reports pause and stop states in stats', async function () {
+      const w = new BrowserWindow({
+        show: true,
+        width: 320,
+        height: 240
+      });
+      await w.loadURL('data:text/html,<body>stats lifecycle</body>');
+
+      let stream: any;
+      try {
+        stream = (w.webContents as any).beginSharedTextureSubscription({
+          fps: 5
+        });
+      } catch (error: any) {
+        if (/requires hardware acceleration/.test(error.message)) {
+          return this.skip();
+        }
+        throw error;
+      }
+
+      stream.pause();
+      expect(stream.getStats().paused).to.equal(true);
+      expect(stream.getStats().stopped).to.equal(false);
+
+      stream.stop();
+      expect(stream.getStats().paused).to.equal(false);
+      expect(stream.getStats().stopped).to.equal(true);
     });
 
     ifit(process.platform === 'win32')('drops stream frames while the previous frame is unreleased', async function () {

@@ -51,6 +51,7 @@ struct SharedTextureFrameProducerStats {
   int unexpected_frame_done_count = 0;
   int dropped_frame_count = 0;
   gfx::Size last_frame_coded_size;
+  int64_t last_frame_timestamp = 0;
   std::string last_error;
 };
 

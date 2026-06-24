@@ -209,6 +209,7 @@ void SharedTextureFrameProducer::OnFrameCaptured(
   PopulateSharedTextureValueFromFrame(&texture, gmb_handle, *info, content_rect,
                                       content::WidgetType::kFrame);
   stats_.last_frame_coded_size = texture.coded_size;
+  stats_.last_frame_timestamp = texture.timestamp;
 
   texture.releaser_holder = new SharedTextureReleaserHolder(
       std::move(gmb_handle), std::move(callbacks),

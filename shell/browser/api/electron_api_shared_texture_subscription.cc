@@ -19,6 +19,23 @@
 
 namespace electron::api {
 
+namespace {
+
+const char* OutputModeToString(
+    SharedTextureFrameProducerOptions::OutputMode mode) {
+  switch (mode) {
+    case SharedTextureFrameProducerOptions::OutputMode::kSourceSize:
+      return "source-size";
+    case SharedTextureFrameProducerOptions::OutputMode::kFixed:
+      return "fixed";
+    case SharedTextureFrameProducerOptions::OutputMode::kMaxBounds:
+      return "max-bounds";
+  }
+  return "source-size";
+}
+
+}  // namespace
+
 gin::WrapperInfo SharedTextureSubscription::kWrapperInfo =
     electron::MakeWrapperInfo(electron::kElectronSharedTextureSubscription);
 
@@ -111,6 +128,22 @@ v8::Local<v8::Value> SharedTextureSubscription::GetStats(
   dict.Set("currentInFlightFrames", in_flight_frames_);
   dict.Set("maxInFlightFrames", 1);
   dict.Set("targetFrameRate", target_frame_rate_);
+  dict.Set("lastFrameTimestamp", producer_stats.last_frame_timestamp);
+
+  gin_helper::Dictionary last_frame_coded_size(isolate,
+                                               v8::Object::New(isolate));
+  last_frame_coded_size.Set("width", producer_stats.last_frame_coded_size.width());
+  last_frame_coded_size.Set("height",
+                            producer_stats.last_frame_coded_size.height());
+  dict.Set("lastFrameCodedSize", last_frame_coded_size);
+
+  dict.Set("outputMode",
+           std::string(OutputModeToString(options_.output_mode)));
+  gin_helper::Dictionary output_size(isolate, v8::Object::New(isolate));
+  output_size.Set("width", options_.output_size.width());
+  output_size.Set("height", options_.output_size.height());
+  dict.Set("outputSize", output_size);
+  dict.Set("preserveAspectRatio", options_.preserve_aspect_ratio);
   dict.Set("nativeCapturerCreateCount",
            producer_stats.native_capturer_create_count);
   dict.Set("errorCount", error_count_);
