@@ -34,6 +34,10 @@ class SharedTextureSubscription final
     media::VideoPixelFormat pixel_format = media::PIXEL_FORMAT_ARGB;
     bool stay_hidden = true;
     bool stay_awake = false;
+    SharedTextureFrameProducerOptions::OutputMode output_mode =
+        SharedTextureFrameProducerOptions::OutputMode::kSourceSize;
+    gfx::Size output_size;
+    bool preserve_aspect_ratio = true;
   };
 
   static SharedTextureSubscription* Create(v8::Isolate* isolate,

@@ -51,6 +51,9 @@ void SharedTextureSubscription::Start() {
   producer_options.stay_awake = options_.stay_awake;
   producer_options.fps = options_.fps;
   producer_options.is_activity = false;
+  producer_options.output_mode = options_.output_mode;
+  producer_options.output_size = options_.output_size;
+  producer_options.preserve_aspect_ratio = options_.preserve_aspect_ratio;
   state_ = State::kStreaming;
   producer_->Start(producer_options);
 }

@@ -3182,6 +3182,25 @@ describe('BrowserWindow module', () => {
       }).to.throw('fps must be between 1 and 60');
     });
 
+    it('rejects invalid output constraints', () => {
+      const w = new BrowserWindow({ show: false });
+      expect(() => {
+        (w.webContents as any).beginSharedTextureSubscription({
+          output: { mode: 'unknown' }
+        });
+      }).to.throw('output.mode must be one of: source-size, fixed, max-bounds');
+      expect(() => {
+        (w.webContents as any).beginSharedTextureSubscription({
+          output: { mode: 'fixed' }
+        });
+      }).to.throw('output.size is required');
+      expect(() => {
+        (w.webContents as any).beginSharedTextureSubscription({
+          output: { mode: 'max-bounds', maxSize: { width: 0, height: 256 } }
+        });
+      }).to.throw('output.maxSize width and height must be between 1 and 8192');
+    });
+
     ifit(process.platform === 'win32')('emits shared texture frames and reports stats', async function () {
       this.timeout(30000);
 
@@ -3259,6 +3278,70 @@ describe('BrowserWindow module', () => {
       expect(stats.releasedFrames).to.be.greaterThan(0);
       expect(stats.currentInFlightFrames).to.equal(0);
       expect(stats.stopped).to.equal(true);
+    });
+
+    ifit(process.platform === 'win32')('applies max-bounds output constraints', async function () {
+      this.timeout(30000);
+
+      const w = new BrowserWindow({
+        show: true,
+        width: 640,
+        height: 480,
+        webPreferences: {
+          backgroundThrottling: false
+        }
+      });
+      await w.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`
+        <!doctype html>
+        <meta charset="utf-8">
+        <style>
+          html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+          body { background: linear-gradient(135deg, #1b5e20, #00acc1); }
+        </style>
+      `)}`);
+
+      let stream: any;
+      try {
+        stream = (w.webContents as any).beginSharedTextureSubscription({
+          fps: 10,
+          output: {
+            mode: 'max-bounds',
+            maxSize: { width: 160, height: 160 },
+            preserveAspectRatio: true
+          }
+        });
+      } catch (error: any) {
+        if (/requires hardware acceleration/.test(error.message)) {
+          return this.skip();
+        }
+        throw error;
+      }
+
+      let streamError: Error | null = null;
+      stream.on('error', (error: Error) => {
+        streamError = error;
+      });
+
+      const frame: any = await Promise.race([
+        once(stream, 'frame').then(([capturedFrame]) => capturedFrame),
+        setTimeout(10000).then(() => {
+          throw new Error('Timed out while waiting for constrained shared texture stream frame');
+        })
+      ]);
+
+      if (streamError) {
+        const message = String((streamError as any).message || streamError);
+        if (/not backed by a GPU memory buffer/.test(message)) {
+          stream.stop();
+          return this.skip();
+        }
+        throw streamError;
+      }
+
+      expect(frame.textureInfo.codedSize.width).to.be.at.most(160);
+      expect(frame.textureInfo.codedSize.height).to.be.at.most(160);
+      frame.release();
+      stream.stop();
     });
 
     ifit(process.platform === 'win32')('drops stream frames while the previous frame is unreleased', async function () {

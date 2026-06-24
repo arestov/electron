@@ -447,6 +447,8 @@ namespace {
 // Global toggle for disabling draggable regions checks.
 bool g_disable_draggable_regions = false;
 
+constexpr int kMaxSharedTextureOutputDimension = 8192;
+
 #if BUILDFLAG(ENABLE_PRINTING)
 // Constants we use for printing.
 constexpr char kFrom[] = "from";
@@ -597,6 +599,69 @@ constexpr std::string_view CursorTypeToString(
     default:
       return "default";
   }
+}
+
+bool ReadSharedTextureOutputSize(gin_helper::ErrorThrower* thrower,
+                                 gin_helper::Dictionary* dict,
+                                 const char* key,
+                                 gfx::Size* size) {
+  gin_helper::Dictionary size_dict;
+  if (!dict->Get(key, &size_dict)) {
+    thrower->ThrowError(std::string("output.") + key + " is required");
+    return false;
+  }
+
+  int width = 0;
+  int height = 0;
+  if (!size_dict.Get("width", &width) || !size_dict.Get("height", &height) ||
+      width <= 0 || height <= 0 ||
+      width > kMaxSharedTextureOutputDimension ||
+      height > kMaxSharedTextureOutputDimension) {
+    thrower->ThrowError(std::string("output.") + key +
+                        " width and height must be between 1 and 8192");
+    return false;
+  }
+
+  *size = gfx::Size(width, height);
+  return true;
+}
+
+bool ReadSharedTextureOutputOptions(
+    gin_helper::ErrorThrower* thrower,
+    gin_helper::Dictionary* options,
+    SharedTextureSubscription::Options* subscription_options) {
+  gin_helper::Dictionary output;
+  if (!options->Get("output", &output))
+    return true;
+
+  std::string mode = "source-size";
+  output.Get("mode", &mode);
+  output.Get("preserveAspectRatio",
+             &subscription_options->preserve_aspect_ratio);
+
+  if (mode == "source-size") {
+    subscription_options->output_mode =
+        SharedTextureFrameProducerOptions::OutputMode::kSourceSize;
+    subscription_options->output_size = gfx::Size();
+    return true;
+  }
+
+  if (mode == "fixed") {
+    subscription_options->output_mode =
+        SharedTextureFrameProducerOptions::OutputMode::kFixed;
+    return ReadSharedTextureOutputSize(thrower, &output, "size",
+                                       &subscription_options->output_size);
+  }
+
+  if (mode == "max-bounds") {
+    subscription_options->output_mode =
+        SharedTextureFrameProducerOptions::OutputMode::kMaxBounds;
+    return ReadSharedTextureOutputSize(thrower, &output, "maxSize",
+                                       &subscription_options->output_size);
+  }
+
+  thrower->ThrowError("output.mode must be one of: source-size, fixed, max-bounds");
+  return false;
 }
 
 // Refs
@@ -4093,6 +4158,11 @@ v8::Local<v8::Value> WebContents::BeginSharedTextureSubscription(
         thrower.ThrowError("pixelFormat must be one of: bgra, rgba, rgbaf16");
         return v8::Undefined(isolate);
       }
+    }
+
+    if (!ReadSharedTextureOutputOptions(&thrower, &options,
+                                        &subscription_options)) {
+      return v8::Undefined(isolate);
     }
   }
 

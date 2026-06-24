@@ -15,6 +15,7 @@
 #include "base/time/time.h"
 #include "components/viz/host/client_frame_sink_video_capturer.h"
 #include "content/public/common/widget_type.h"
+#include "ui/gfx/geometry/size.h"
 #include "media/base/video_types.h"
 #include "media/capture/mojom/video_capture_buffer.mojom-forward.h"
 #include "media/capture/mojom/video_capture_types.mojom.h"
@@ -27,11 +28,20 @@ class WebContents;
 namespace electron {
 
 struct SharedTextureFrameProducerOptions {
+  enum class OutputMode {
+    kSourceSize,
+    kFixed,
+    kMaxBounds,
+  };
+
   media::VideoPixelFormat pixel_format = media::PIXEL_FORMAT_ARGB;
   bool stay_hidden = true;
   bool stay_awake = false;
   int fps = 60;
   bool is_activity = true;
+  OutputMode output_mode = OutputMode::kSourceSize;
+  gfx::Size output_size;
+  bool preserve_aspect_ratio = true;
 };
 
 struct SharedTextureFrameProducerStats {
@@ -40,6 +50,7 @@ struct SharedTextureFrameProducerStats {
   int released_frame_count = 0;
   int unexpected_frame_done_count = 0;
   int dropped_frame_count = 0;
+  gfx::Size last_frame_coded_size;
   std::string last_error;
 };
 
@@ -69,6 +80,7 @@ class SharedTextureFrameProducer
   void Stop();
   void RequestRefreshFrame();
   void DropNextFrame();
+  bool SetFrameRate(int fps);
 
   [[nodiscard]] bool is_started() const { return video_capturer_started_; }
   [[nodiscard]] const SharedTextureFrameProducerStats& stats() const {

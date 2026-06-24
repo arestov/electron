@@ -76,6 +76,15 @@ void SharedTextureFrameProducer::DropNextFrame() {
   drop_next_frame_ = true;
 }
 
+bool SharedTextureFrameProducer::SetFrameRate(int fps) {
+  options_.fps = fps;
+  if (!video_capturer_)
+    return true;
+
+  video_capturer_->SetMinCapturePeriod(base::Hertz(options_.fps));
+  return true;
+}
+
 bool SharedTextureFrameProducer::EnsureCapturer() {
   auto* primary_frame = web_contents_->GetPrimaryMainFrame();
   auto* render_widget_host =
@@ -115,10 +124,8 @@ bool SharedTextureFrameProducer::ApplyCaptureSettings() {
     return false;
   }
 
-  video_capturer_->SetMinCapturePeriod(base::Hertz(options_.fps));
+  SetFrameRate(options_.fps);
   video_capturer_->SetFormat(options_.pixel_format);
-  // Unlike OSR, normal onscreen frame sinks need exact constraints here to
-  // reliably produce requested refresh frames.
   const gfx::Size view_size = gfx::ToRoundedSize(gfx::ScaleSize(
       gfx::SizeF(view->GetViewBounds().size()), view->GetDeviceScaleFactor()));
   if (view_size.IsEmpty()) {
@@ -126,7 +133,24 @@ bool SharedTextureFrameProducer::ApplyCaptureSettings() {
     delegate_->OnSharedTextureError(stats_.last_error);
     return false;
   }
-  video_capturer_->SetResolutionConstraints(view_size, view_size, true);
+
+  switch (options_.output_mode) {
+    case SharedTextureFrameProducerOptions::OutputMode::kSourceSize:
+      // Unlike OSR, normal onscreen frame sinks need exact constraints here to
+      // reliably produce requested refresh frames.
+      video_capturer_->SetResolutionConstraints(view_size, view_size, true);
+      break;
+    case SharedTextureFrameProducerOptions::OutputMode::kFixed:
+      video_capturer_->SetResolutionConstraints(
+          options_.output_size, options_.output_size,
+          options_.preserve_aspect_ratio);
+      break;
+    case SharedTextureFrameProducerOptions::OutputMode::kMaxBounds:
+      video_capturer_->SetResolutionConstraints(
+          gfx::Size(1, 1), options_.output_size,
+          options_.preserve_aspect_ratio);
+      break;
+  }
   return true;
 }
 
@@ -184,6 +208,7 @@ void SharedTextureFrameProducer::OnFrameCaptured(
   CapturedSharedTextureValue texture;
   PopulateSharedTextureValueFromFrame(&texture, gmb_handle, *info, content_rect,
                                       content::WidgetType::kFrame);
+  stats_.last_frame_coded_size = texture.coded_size;
 
   texture.releaser_holder = new SharedTextureReleaserHolder(
       std::move(gmb_handle), std::move(callbacks),
