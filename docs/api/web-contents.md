@@ -1782,6 +1782,30 @@ Captures a snapshot of the page within `rect`. Omitting `rect` will capture the 
 The page is considered visible when its browser window is hidden and the capturer count is non-zero.
 If you would like the page to stay hidden, you should ensure that `stayHidden` is set to true.
 
+#### `contents.captureNextSharedTexture([options])` _Experimental_
+
+* `options` Object (optional)
+  * `timeoutMs` number (optional) - Time to wait for the next compositor frame before rejecting. Default is `250`.
+  * `pixelFormat` string (optional) - Requested shared texture pixel format. Can be `bgra`, `rgba`, or `rgbaf16`. Default is `bgra`.
+  * `stayHidden` boolean (optional) - Keep the page hidden from the Page Visibility API perspective while temporarily marking the `WebContents` as captured. Default is `true`.
+  * `stayAwake` boolean (optional) - Prevent the page from being treated as idle while the capture is pending. Default is `false`.
+
+Returns `Promise<CapturedSharedTexture>` - Resolves with a [CapturedSharedTexture](structures/captured-shared-texture.md).
+
+Captures the next available compositor frame from this normal interactive `WebContents` and returns it as a GPU shared texture when supported. This method does not enable offscreen rendering and does not change the presentation mode of the `WebContents`.
+
+While waiting for the next frame, this method temporarily marks the `WebContents` as being captured, similarly to `capturePage()`, so hidden-rendering and occlusion optimizations do not prevent frame production. Hidden windows are supported when a valid `RenderWidgetHostView`, composited surface, and non-zero content size exist.
+
+Minimized, destroyed, zero-sized, unhosted, or never-composited `WebContents` may still time out or reject.
+
+The returned texture must be released explicitly by calling `release()` after the external renderer has reached a GPU-safe point or fence. Releasing before the external GPU pipeline is done using the texture can lead to corrupted frames or undefined platform-specific behavior.
+
+Only one unreleased captured texture is supported per `WebContents` in this experimental version. Calling this method while a previous texture is unreleased will reject.
+
+No CPU fallback is performed. If the captured frame is not backed by a GPU memory buffer suitable for sharing, the promise rejects.
+
+This method requires hardware acceleration. If hardware acceleration is disabled, the promise rejects.
+
 #### `contents.isBeingCaptured()`
 
 Returns `boolean` - Whether this page is being captured. It returns true when the capturer count

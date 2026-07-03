@@ -1,3 +1,4 @@
+import { sharedTexture } from 'electron';
 import {
   app,
   BrowserWindow,
@@ -2746,6 +2747,423 @@ describe('BrowserWindow module', () => {
       // Check the 25th byte in the PNG.
       // Values can be 0,2,3,4, or 6. We want 6, which is RGB + Alpha
       expect(imgBuffer[25]).to.equal(6);
+    });
+  });
+
+  describe('webContents.captureNextSharedTexture()', () => {
+    afterEach(closeAllWindows);
+
+    it('is exposed on WebContents', () => {
+      const w = new BrowserWindow({ show: false });
+      expect((w.webContents as any).captureNextSharedTexture).to.be.a('function');
+    });
+
+    it('rejects invalid timeout values', async () => {
+      const w = new BrowserWindow({ show: false });
+      await expect((w.webContents as any).captureNextSharedTexture({ timeoutMs: 0 })).to.eventually.be.rejectedWith(
+        'timeoutMs must be greater than 0'
+      );
+    });
+
+    it('rejects invalid pixelFormat values', async () => {
+      const w = new BrowserWindow({ show: false });
+      await expect(
+        (w.webContents as any).captureNextSharedTexture({ pixelFormat: 'argb' })
+      ).to.eventually.be.rejectedWith('pixelFormat must be one of: bgra, rgba, rgbaf16');
+    });
+
+    ifit(process.platform === 'win32')('rejects a pending capture when WebContents is destroyed', async function () {
+      this.timeout(20000);
+
+      const w = new BrowserWindow({
+        show: false,
+        width: 320,
+        height: 240,
+        webPreferences: {
+          backgroundThrottling: false
+        }
+      });
+      await w.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(
+        '<body style="margin:0;background:#1565c0"></body>'
+      )}`);
+
+      const capture = (w.webContents as any).captureNextSharedTexture({
+        timeoutMs: 10000,
+        pixelFormat: 'bgra'
+      });
+      w.destroy();
+
+      await expect(capture).to.eventually.be.rejectedWith(
+        'WebContents was destroyed before a shared texture frame was captured'
+      );
+    });
+
+    ifit(process.platform === 'win32')('rejects when no shared texture frame arrives before timeout', async function () {
+      this.timeout(20000);
+
+      const w = new BrowserWindow({
+        show: false,
+        width: 320,
+        height: 240,
+        webPreferences: {
+          backgroundThrottling: false
+        }
+      });
+      await w.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(
+        '<body style="margin:0;background:#4527a0"></body>'
+      )}`);
+
+      try {
+        await expect(
+          (w.webContents as any).captureNextSharedTexture({
+            timeoutMs: 1,
+            pixelFormat: 'bgra'
+          })
+        ).to.eventually.be.rejectedWith('Timed out while waiting for a shared texture frame');
+      } catch (error: any) {
+        if (/requires hardware acceleration|not backed by a GPU memory buffer/.test(error.message)) {
+          return this.skip();
+        }
+        throw error;
+      }
+    });
+
+    ifit(process.platform === 'win32')('captures from a hidden BrowserWindow', async function () {
+      this.timeout(20000);
+
+      const w = new BrowserWindow({
+        show: false,
+        width: 320,
+        height: 240,
+        webPreferences: {
+          backgroundThrottling: false
+        }
+      });
+      await w.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(
+        '<body style="margin:0;background:#d32f2f"></body>'
+      )}`);
+
+      let texture: any;
+      try {
+        texture = await (w.webContents as any).captureNextSharedTexture({
+          timeoutMs: 5000,
+          pixelFormat: 'bgra'
+        });
+      } catch (error: any) {
+        if (
+          /requires hardware acceleration|not backed by a GPU memory buffer|Timed out while waiting/.test(error.message)
+        ) {
+          return this.skip();
+        }
+        throw error;
+      }
+
+      expect(texture.textureInfo.codedSize.width).to.be.greaterThan(0);
+      expect(texture.textureInfo.codedSize.height).to.be.greaterThan(0);
+      texture.release();
+      expect(w.isVisible()).to.equal(false);
+    });
+
+    ifit(process.platform === 'win32')('ignores duplicate release calls', async function () {
+      this.timeout(20000);
+
+      const w = new BrowserWindow({
+        show: true,
+        width: 320,
+        height: 240,
+        webPreferences: {
+          backgroundThrottling: false
+        }
+      });
+      await w.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(
+        '<body style="margin:0;background:#00695c"></body>'
+      )}`);
+
+      let texture: any;
+      try {
+        texture = await (w.webContents as any).captureNextSharedTexture({
+          timeoutMs: 5000,
+          pixelFormat: 'bgra'
+        });
+      } catch (error: any) {
+        if (
+          /requires hardware acceleration|not backed by a GPU memory buffer|Timed out while waiting/.test(error.message)
+        ) {
+          return this.skip();
+        }
+        throw error;
+      }
+
+      expect(() => {
+        texture.release();
+        texture.release();
+      }).to.not.throw();
+
+      const second = await (w.webContents as any).captureNextSharedTexture({ timeoutMs: 5000, pixelFormat: 'bgra' });
+      second.release();
+    });
+
+    ifit(process.platform === 'win32')('recovers after rejecting capture while a frame is unreleased', async function () {
+      this.timeout(20000);
+
+      const w = new BrowserWindow({
+        show: true,
+        width: 320,
+        height: 240,
+        webPreferences: {
+          backgroundThrottling: false
+        }
+      });
+      await w.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(
+        '<body style="margin:0;background:#37474f"></body>'
+      )}`);
+
+      let texture: any;
+      try {
+        texture = await (w.webContents as any).captureNextSharedTexture({
+          timeoutMs: 5000,
+          pixelFormat: 'bgra'
+        });
+      } catch (error: any) {
+        if (
+          /requires hardware acceleration|not backed by a GPU memory buffer|Timed out while waiting/.test(error.message)
+        ) {
+          return this.skip();
+        }
+        throw error;
+      }
+
+      await expect(
+        (w.webContents as any).captureNextSharedTexture({ timeoutMs: 500, pixelFormat: 'bgra' })
+      ).to.eventually.be.rejectedWith('A previously captured shared texture has not been released');
+
+      let second: any;
+      try {
+        texture.release();
+        second = await (w.webContents as any).captureNextSharedTexture({
+          timeoutMs: 5000,
+          pixelFormat: 'bgra'
+        });
+      } catch (error: any) {
+        if (
+          /requires hardware acceleration|not backed by a GPU memory buffer|Timed out while waiting/.test(error.message)
+        ) {
+          return this.skip();
+        }
+        throw error;
+      } finally {
+        second?.release();
+      }
+
+      const stats = (w.webContents as any)._getSharedTextureCaptureStatsForTesting();
+      expect(stats.frameInFlight).to.equal(false);
+      expect(stats.capturePending).to.equal(false);
+    });
+
+    ifit(process.platform === 'win32')('preserves page visibility when stayHidden is true', async function () {
+      this.timeout(20000);
+
+      const w = new BrowserWindow({
+        show: false,
+        width: 320,
+        height: 240,
+        webPreferences: {
+          backgroundThrottling: false
+        }
+      });
+      await w.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(
+        '<script>window.hiddenBefore = document.hidden</script>'
+      )}`);
+      if (!await w.webContents.executeJavaScript('window.hiddenBefore')) {
+        return this.skip();
+      }
+
+      let texture: any;
+      try {
+        texture = await (w.webContents as any).captureNextSharedTexture({
+          stayHidden: true,
+          timeoutMs: 5000,
+          pixelFormat: 'bgra'
+        });
+      } catch (error: any) {
+        if (
+          /requires hardware acceleration|not backed by a GPU memory buffer|Timed out while waiting/.test(error.message)
+        ) {
+          return this.skip();
+        }
+        throw error;
+      }
+
+      texture.release();
+      expect(await w.webContents.executeJavaScript('window.hiddenBefore && document.hidden')).to.equal(true);
+      expect(w.isVisible()).to.equal(false);
+    });
+
+    ifit(process.platform === 'win32')('reuses the native capturer across repeated captures', async function () {
+      this.timeout(30000);
+
+      const w = new BrowserWindow({
+        show: true,
+        width: 320,
+        height: 240,
+        webPreferences: {
+          backgroundThrottling: false
+        }
+      });
+      await w.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`
+        <!doctype html>
+        <meta charset="utf-8">
+        <style>
+          html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+          body { background: #263238; }
+          #box { width: 96px; height: 96px; background: #ffca28; }
+        </style>
+        <div id="box"></div>
+        <script>
+          let x = 0;
+          function tick() {
+            x = (x + 1) % 160;
+            document.getElementById('box').style.transform = 'translateX(' + x + 'px)';
+            requestAnimationFrame(tick);
+          }
+          requestAnimationFrame(tick);
+        </script>
+      `)}`);
+
+      try {
+        for (let i = 0; i < 12; i++) {
+          const texture = await (w.webContents as any).captureNextSharedTexture({
+            timeoutMs: 5000,
+            pixelFormat: 'bgra'
+          });
+          texture.release();
+        }
+      } catch (error: any) {
+        if (
+          /requires hardware acceleration|not backed by a GPU memory buffer|Timed out while waiting/.test(error.message)
+        ) {
+          return this.skip();
+        }
+        throw error;
+      }
+
+      const stats = (w.webContents as any)._getSharedTextureCaptureStatsForTesting();
+      expect(stats.nativeCapturerCreateCount).to.equal(1);
+      expect(stats.capturedFrameCount).to.be.greaterThanOrEqual(12);
+      expect(stats.capturePending).to.equal(false);
+      expect(stats.frameInFlight).to.equal(false);
+    });
+
+    ifit(process.platform === 'win32')('returns a shared texture that can be imported and released', async function () {
+      this.timeout(20000);
+
+      const w = new BrowserWindow({
+        show: true,
+        width: 320,
+        height: 240,
+        webPreferences: {
+          backgroundThrottling: false
+        }
+      });
+      await w.loadURL(
+        `data:text/html;charset=utf-8,${encodeURIComponent(`
+        <!doctype html>
+        <meta charset="utf-8">
+        <style>
+          html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+          body { background: #1b5e20; color: white; font: 24px sans-serif; }
+          #box { width: 120px; height: 120px; margin: 48px; background: #ffb300; }
+        </style>
+        <input id="field" value="before-capture">
+        <div id="box">capture</div>
+        <script>
+          window.captureRuntimeState = { clicks: 0 };
+          document.getElementById('box').addEventListener('click', () => {
+            window.captureRuntimeState.clicks++;
+          });
+          document.getElementById('field').focus();
+          let n = 0;
+          setInterval(() => {
+            n++;
+            document.getElementById('box').style.transform = 'translateX(' + (n % 24) + 'px)';
+          }, 50);
+        </script>
+      `)}`
+      );
+      w.show();
+      await w.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => resolve()))');
+      await w.webContents.executeJavaScript(`
+        document.getElementById('field').value = 'same-runtime';
+        document.getElementById('box').click();
+      `);
+
+      let texture: any;
+      try {
+        texture = await (w.webContents as any).captureNextSharedTexture({ timeoutMs: 5000, pixelFormat: 'bgra' });
+      } catch (error: any) {
+        if (
+          /requires hardware acceleration|not backed by a GPU memory buffer|Timed out while waiting/.test(error.message)
+        ) {
+          return this.skip();
+        }
+        throw error;
+      }
+
+      expect(texture).to.have.property('textureInfo');
+      expect(texture).to.have.property('release').that.is.a('function');
+      expect(texture.textureInfo.pixelFormat).to.equal('bgra');
+      expect(Buffer.isBuffer(texture.textureInfo.handle.ntHandle)).to.equal(true);
+      expect(
+        await w.webContents.executeJavaScript(`
+        ({
+          value: document.getElementById('field').value,
+          activeElementId: document.activeElement.id,
+          clicks: window.captureRuntimeState.clicks
+        })
+      `)
+      ).to.deep.equal({
+        value: 'same-runtime',
+        activeElementId: 'field',
+        clicks: 1
+      });
+
+      let releaseImportedTexture!: () => void;
+      const sourceReleased = new Promise<void>((resolve) => {
+        const importedTexture = sharedTexture.importSharedTexture({
+          textureInfo: texture.textureInfo,
+          allReferencesReleased: () => {
+            texture.release();
+            resolve();
+          }
+        });
+        releaseImportedTexture = () => importedTexture.release();
+      });
+
+      await expect(
+        (w.webContents as any).captureNextSharedTexture({ timeoutMs: 500, pixelFormat: 'bgra' })
+      ).to.eventually.be.rejectedWith('A previously captured shared texture has not been released');
+
+      releaseImportedTexture();
+      await sourceReleased;
+
+      const second = await (w.webContents as any).captureNextSharedTexture({ timeoutMs: 5000, pixelFormat: 'bgra' });
+      second.release();
+      await setTimeout(0);
+
+      for (let i = 0; i < 3; i++) {
+        const polled = await (w.webContents as any).captureNextSharedTexture({ timeoutMs: 5000, pixelFormat: 'bgra' });
+        const polledReleased = new Promise<void>((resolve) => {
+          const importedPolled = sharedTexture.importSharedTexture({
+            textureInfo: polled.textureInfo,
+            allReferencesReleased: () => {
+              polled.release();
+              resolve();
+            }
+          });
+          importedPolled.release();
+        });
+        await polledReleased;
+      }
     });
   });
 

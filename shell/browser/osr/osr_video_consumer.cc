@@ -11,6 +11,7 @@
 #include "media/capture/mojom/video_capture_buffer.mojom.h"
 #include "media/capture/mojom/video_capture_types.mojom.h"
 #include "services/viz/privileged/mojom/compositing/frame_sink_video_capture.mojom-shared.h"
+#include "shell/browser/capture/shared_texture_frame_info.h"
 #include "shell/browser/osr/osr_render_widget_host_view.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
 #include "third_party/skia/include/core/SkRegion.h"
@@ -114,34 +115,8 @@ void OffScreenVideoConsumer::OnFrameCaptured(
     auto gmb_handle = orig_handle.Clone();
 
     OffscreenSharedTextureValue texture;
-    texture.pixel_format = info->pixel_format;
-    texture.coded_size = info->coded_size;
-    texture.visible_rect = info->visible_rect;
-    texture.content_rect = content_rect;
-    texture.color_space = info->color_space;
-    texture.timestamp = info->timestamp.InMicroseconds();
-    texture.frame_count = info->metadata.capture_counter.value_or(0);
-    texture.capture_update_rect = info->metadata.capture_update_rect;
-    texture.source_size = info->metadata.source_size;
-    texture.region_capture_rect = info->metadata.region_capture_rect;
-    texture.widget_type = view_->GetWidgetType();
-
-#if BUILDFLAG(IS_WIN)
-    texture.shared_texture_handle =
-        reinterpret_cast<uintptr_t>(gmb_handle.dxgi_handle().buffer_handle());
-#elif BUILDFLAG(IS_APPLE)
-    texture.shared_texture_handle =
-        reinterpret_cast<uintptr_t>(gmb_handle.io_surface().get());
-#elif BUILDFLAG(IS_LINUX)
-    const auto& native_pixmap = gmb_handle.native_pixmap_handle();
-    texture.modifier = native_pixmap.modifier;
-    texture.supports_zero_copy_webgpu_import =
-        native_pixmap.supports_zero_copy_webgpu_import;
-    for (const auto& plane : native_pixmap.planes) {
-      texture.planes.emplace_back(plane.stride, plane.offset, plane.size,
-                                  plane.fd.get());
-    }
-#endif
+    PopulateSharedTextureValueFromFrame(&texture, gmb_handle, *info,
+                                        content_rect, view_->GetWidgetType());
 
     // The release holder will be released from JS side when `release` called
     texture.releaser_holder = new OffscreenReleaserHolder(std::move(gmb_handle),

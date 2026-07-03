@@ -1,4 +1,3 @@
-﻿
 // Copyright (c) 2024 GitHub, Inc.
 // Use of this source code is governed by the MIT license that can be found in
 // the LICENSE file.
@@ -6,54 +5,18 @@
 #ifndef ELECTRON_SHELL_BROWSER_OSR_OSR_PAINT_EVENT_H
 #define ELECTRON_SHELL_BROWSER_OSR_OSR_PAINT_EVENT_H
 
-#include "base/functional/callback_helpers.h"
 #include "content/public/common/widget_type.h"
 #include "media/base/video_types.h"
-#include "mojo/public/cpp/bindings/pending_remote.h"
-#include "services/viz/privileged/mojom/compositing/frame_sink_video_capture.mojom.h"
+#include "shell/browser/capture/shared_texture_releaser.h"
+#include "shell/browser/capture/shared_texture_types.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/native_ui_types.h"
 
-#include <cstdint>
-
 namespace electron {
 
-struct OffscreenNativePixmapPlaneInfo {
-  // The strides and offsets in bytes to be used when accessing the buffers
-  // via a memory mapping. One per plane per entry. Size in bytes of the
-  // plane is necessary to map the buffers.
-  uint32_t stride;
-  uint64_t offset;
-  uint64_t size;
-
-  // File descriptor for the underlying memory object (usually dmabuf).
-  int fd;
-
-  OffscreenNativePixmapPlaneInfo() = delete;
-  ~OffscreenNativePixmapPlaneInfo();
-  OffscreenNativePixmapPlaneInfo(const OffscreenNativePixmapPlaneInfo& other);
-  OffscreenNativePixmapPlaneInfo(uint32_t stride,
-                                 uint64_t offset,
-                                 uint64_t size,
-                                 int fd);
-};
-
-struct OffscreenReleaserHolder {
-  OffscreenReleaserHolder() = delete;
-  ~OffscreenReleaserHolder();
-  OffscreenReleaserHolder(
-      gfx::GpuMemoryBufferHandle gmb_handle,
-      mojo::PendingRemote<viz::mojom::FrameSinkVideoConsumerFrameCallbacks>
-          releaser);
-
-  // GpuMemoryBufferHandle, keep the scoped handle alive
-  gfx::GpuMemoryBufferHandle gmb_handle;
-
-  // Releaser, hold this to prevent FrameSinkVideoCapturer recycle frame
-  mojo::PendingRemote<viz::mojom::FrameSinkVideoConsumerFrameCallbacks>
-      releaser;
-};
+using OffscreenReleaserHolder = SharedTextureReleaserHolder;
+using OffscreenNativePixmapPlaneInfo = SharedTextureNativePixmapPlaneInfo;
 
 struct OffscreenSharedTextureValue {
   OffscreenSharedTextureValue();
